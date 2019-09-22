@@ -71,13 +71,15 @@ if adc:
 
 # Load SVG file, extract paths & convert to point lists --------------------
 
-dom               = parse("graphics/eye.svg")
+dom               = parse("graphics/eye_no_iris.svg")
 vb                = getViewBox(dom)
-pupilMinPts       = getPoints(dom, "pupilMin"      , 32, True , True )
-pupilMaxPts       = getPoints(dom, "pupilMax"      , 32, True , True )
-irisPts           = getPoints(dom, "iris"          , 32, True , True )
 scleraFrontPts    = getPoints(dom, "scleraFront"   ,  0, False, False)
 scleraBackPts     = getPoints(dom, "scleraBack"    ,  0, False, False)
+
+domBackOfEye               = parse("graphics/eye_no_iris.svg")
+vbBackOfEye                = getViewBox(domBackOfEye)
+scleraFrontPtsBackOfEye    = getPoints(domBackOfEye, "scleraFront"   ,  0, False, False)
+scleraBackPtsBackOfEye     = getPoints(domBackOfEye, "scleraBack"    ,  0, False, False)
 
 
 # Set up display and initialize pi3d ---------------------------------------
@@ -111,8 +113,6 @@ light  = pi3d.Light(lightpos=(0, -500, -500), lightamb=(0.2, 0.2, 0.2))
 
 # Load texture maps --------------------------------------------------------
 
-irisMap   = pi3d.Texture("graphics/iris.jpg"  , mipmap=False,
-              filter=pi3d.GL_LINEAR)
 scleraMap = pi3d.Texture("graphics/sclera.png", mipmap=False,
               filter=pi3d.GL_LINEAR, blend=True)
 
@@ -124,40 +124,10 @@ scleraMap = pi3d.Texture("graphics/sclera.png", mipmap=False,
 # Initialize static geometry -----------------------------------------------
 
 # Transform point lists to eye dimensions
-scalePoints(pupilMinPts      , vb, eyeRadius)
-scalePoints(pupilMaxPts      , vb, eyeRadius)
-scalePoints(irisPts          , vb, eyeRadius)
 scalePoints(scleraFrontPts   , vb, eyeRadius)
 scalePoints(scleraBackPts    , vb, eyeRadius)
-
-# Regenerating flexible object geometry (such as eyelids during blinks, or
-# iris during pupil dilation) is CPU intensive, can noticably slow things
-# down, especially on single-core boards.  To reduce this load somewhat,
-# determine a size change threshold below which regeneration will not occur;
-# roughly equal to 1/4 pixel, since 4x4 area sampling is used.
-
-# Determine change in pupil size to trigger iris geometry regen
-irisRegenThreshold = 0.0
-a = pointsBounds(pupilMinPts) # Bounds of pupil at min size (in pixels)
-b = pointsBounds(pupilMaxPts) # " at max size
-maxDist = max(abs(a[0] - b[0]), abs(a[1] - b[1]), # Determine distance of max
-              abs(a[2] - b[2]), abs(a[3] - b[3])) # variance around each edge
-# maxDist is motion range in pixels as pupil scales between 0.0 and 1.0.
-# 1.0 / maxDist is one pixel's worth of scale range.  Need 1/4 that...
-if maxDist > 0: irisRegenThreshold = 0.25 / maxDist
-
-
-# Generate initial iris meshes; vertex elements will get replaced on
-# a per-frame basis in the main loop, this just sets up textures, etc.
-rightIris = meshInit(32, 4, True, 0, 0.5/irisMap.iy, False)
-rightIris.set_textures([irisMap])
-rightIris.set_shader(shader)
-# Left iris map U value is offset by 0.5; effectively a 180 degree
-# rotation, so it's less obvious that the same texture is in use on both.
-leftIris = meshInit(32, 4, True, 0.5, 0.5/irisMap.iy, False)
-leftIris.set_textures([irisMap])
-leftIris.set_shader(shader)
-irisZ = zangle(irisPts, eyeRadius)[0] * 0.99 # Get iris Z depth, for later
+scalePoints(scleraFrontPtsBackOfEye   , vbBackOfEye, eyeRadius)
+scalePoints(scleraBackPtsBackOfEye    , vbBackOfEye, eyeRadius)
 
 
 # Generate scleras for each eye...start with a 2D shape for lathing...
@@ -168,6 +138,14 @@ pts    = []
 for i in range(24):
 	ca, sa = pi3d.Utility.from_polar((90 - angle1) - aRange * i / 23)
 	pts.append((ca * eyeRadius, sa * eyeRadius))
+
+angle1BackOfEye = 0 # Sclera front angle
+angle2BackOfEye = zangle(scleraBackPtsBackOfEye , eyeRadius)[1] # " back angle
+aRangeBackOfEye = 180 - angle1BackOfEye - angle2BackOfEye
+ptsBackOfEye    = []
+for i in range(24):
+	caBackOfEye, saBackOfEye = pi3d.Utility.from_polar((90 - angle1BackOfEye) - aRangeBackOfEye * i / 23)
+	ptsBackOfEye.append((caBackOfEye * eyeRadius, saBackOfEye * eyeRadius))
 
 # Scleras are generated independently (object isn't re-used) so each
 # may have a different image map (heterochromia, corneal scar, or the
@@ -180,6 +158,15 @@ rightEye = pi3d.Lathe(path=pts, sides=64)
 rightEye.set_textures([scleraMap])
 rightEye.set_shader(shader)
 reAxis(rightEye, 0.5) # Image map offset = 180 degree rotation
+
+leftEyeBackOfEye = pi3d.Lathe(path=pts, sides=64)
+leftEyeBackOfEye.set_textures([scleraMap])
+leftEyeBackOfEye.set_shader(shader)
+reAxis(leftEyeBackOfEye, 0)
+rightEyeBackOfEye = pi3d.Lathe(path=pts, sides=64)
+rightEyeBackOfEye.set_textures([scleraMap])
+rightEyeBackOfEye.set_shader(shader)
+reAxis(rightEyeBackOfEye, 0.5) # Image map offset = 180 degree rotation
 
 
 # Init global stuff --------------------------------------------------------
@@ -215,21 +202,17 @@ frameCount    = 0
 beginningTime = time.time()
 
 rightEye.positionX(-eyePosition)
-rightIris.positionX(-eyePosition)
-
 leftEye.positionX(eyePosition)
-leftIris.positionX(eyePosition)
 
-currentPupilScale       =  0.5
-prevPupilScale          = -1.0 # Force regen on first frame
-
+rightEyeBackOfEye.positionX(-eyePosition)
+leftEyeBackOfEye.positionX(eyePosition)
 
 trackingPos = 0.3
 trackingPosR = 0.3
 showIrisAndPupil = True
 pressed = False
 # Generate one frame of imagery
-def frame(p):
+def frame():
 
 	global startX, startY, destX, destY, curX, curY
 	global startXR, startYR, destXR, destYR, curXR, curYR
@@ -237,11 +220,7 @@ def frame(p):
 	global moveDurationR, holdDurationR, startTimeR, isMovingR
 	global frames
 	global frameCount
-	global leftIris, rightIris
-	global pupilMinPts, pupilMaxPts, irisPts, irisZ
 	global leftEye, rightEye
-	global prevPupilScale
-	global irisRegenThreshold
 	global trackingPos
 	global trackingPosR
 	global showIrisAndPupil
@@ -265,72 +244,33 @@ def frame(p):
 #	if(now > beginningTime):
 #		print(frames/(now-beginningTime))
         
-	if JOYSTICK_X_IN >= 0 and JOYSTICK_Y_IN >= 0:
-		# Eye position from analog inputs
-		curX = adcValue[JOYSTICK_X_IN]
-		curY = adcValue[JOYSTICK_Y_IN]
-		if JOYSTICK_X_FLIP: curX = 1.0 - curX
-		if JOYSTICK_Y_FLIP: curY = 1.0 - curY
-		curX = -30.0 + curX * 60.0
-		curY = -30.0 + curY * 60.0
-	else :
-		# Autonomous eye position
-		if isMoving == True:
-			if dt <= moveDuration:
-				scale        = (now - startTime) / moveDuration
-				# Ease in/out curve: 3*t^2-2*t^3
-				scale = 3.0 * scale * scale - 2.0 * scale * scale * scale
-				curX         = startX + (destX - startX) * scale
-				curY         = startY + (destY - startY) * scale
-			else:
-				startX       = destX
-				startY       = destY
-				curX         = destX
-				curY         = destY
-				holdDuration = random.uniform(0.1, 1.1)
-				startTime    = now
-				isMoving     = False
-		else:
-			if dt >= holdDuration:
-				destX        = random.uniform(-30.0, 30.0)
-				n            = math.sqrt(900.0 - destX * destX)
-				destY        = random.uniform(-n, n)
-				moveDuration = random.uniform(0.075, 0.175)
-				startTime    = now
-				isMoving     = True
-
-	# Regenerate iris geometry only if size changed by >= 1/4 pixel
-	if abs(p - prevPupilScale) >= irisRegenThreshold:
-		# Interpolate points between min and max pupil sizes
-		interPupil = pointsInterp(pupilMinPts, pupilMaxPts, p)
-		# Generate mesh between interpolated pupil and iris bounds
-		mesh = pointsMesh(None, interPupil, irisPts, 4, -irisZ, True)
-		# Assign to both eyes
-		leftIris.re_init(pts=mesh)
-		rightIris.re_init(pts=mesh)
-		prevPupilScale = p
+	# Eye position from analog inputs
+	curX = adcValue[JOYSTICK_X_IN]
+	curY = adcValue[JOYSTICK_Y_IN]
+	if JOYSTICK_X_FLIP: curX = 1.0 - curX
+	if JOYSTICK_Y_FLIP: curY = 1.0 - curY
+	curX = -30.0 + curX * 60.0
+	curY = -30.0 + curY * 60.0
 
 	# Eyelid WIP
 
 	convergence = 2.0
+	if showIrisAndPupil: 
+	  rightEye.rotateToX(curY)
+	  rightEye.rotateToY(curX - convergence)
+	  rightEye.draw()
 
-	# Right eye (on screen left)
-	if showIrisAndPupil:
-	  rightIris.rotateToX(curY)
-	  rightIris.rotateToY(curX - convergence)
-	  rightIris.draw()
-	rightEye.rotateToX(curY)
-	rightEye.rotateToY(curX - convergence)
-	rightEye.draw()
+	  leftEye.rotateToX(curY)
+	  leftEye.rotateToY(curX + convergence)
+	  leftEye.draw()
+	else:
+	  rightEyeBackOfEye.rotateToX(curY)
+	  rightEyeBackOfEye.rotateToY(curX - convergence)
+	  rightEyeBackOfEye.draw()
 
-	# # Left eye (on screen right)
-	if showIrisAndPupil:
-	  leftIris.rotateToX(curY)
-	  leftIris.rotateToY(curX + convergence)
-	  leftIris.draw()
-	leftEye.rotateToX(curY)
-	leftEye.rotateToY(curX + convergence)
-	leftEye.draw()
+	  leftEyeBackOfEye.rotateToX(curY)
+	  leftEyeBackOfEye.rotateToY(curX + convergence)
+	  leftEyeBackOfEye.draw()
 
 	k = mykeys.read()
 	if k==27:
@@ -338,34 +278,7 @@ def frame(p):
 		DISPLAY.stop()
 		exit(0)
 
-
-def split( # Recursive simulated pupil response when no analog sensor
-  startValue, # Pupil scale starting value (0.0 to 1.0)
-  endValue,   # Pupil scale ending value (")
-  duration,   # Start-to-end time, floating-point seconds
-  range):     # +/- random pupil scale at midpoint
-	startTime = time.time()
-	if range >= 0.125: # Limit subdvision count, because recursion
-		duration *= 0.5 # Split time & range in half for subdivision,
-		range    *= 0.5 # then pick random center point within range:
-		midValue  = ((startValue + endValue - range) * 0.5 +
-		             random.uniform(0.0, range))
-		split(startValue, midValue, duration, range)
-		split(midValue  , endValue, duration, range)
-	else: # No more subdivisons, do iris motion...
-		dv = endValue - startValue
-		while True:
-			dt = time.time() - startTime
-			if dt >= duration: break
-			v = startValue + dv * dt / duration
-			if   v < PUPIL_MIN: v = PUPIL_MIN
-			elif v > PUPIL_MAX: v = PUPIL_MAX
-			frame(v) # Draw frame w/interim pupil scale value
-
-
 # MAIN LOOP -- runs continuously -------------------------------------------
 
 while True:
-	v = random.random()
-	split(currentPupilScale, v, 4.0, 1.0)
-	currentPupilScale = v
+	frame()

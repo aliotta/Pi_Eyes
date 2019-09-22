@@ -73,9 +73,9 @@ if adc:
 
 dom               = parse("graphics/eye_no_iris.svg")
 vb                = getViewBox(dom)
-# pupilMinPts       = getPoints(dom, "pupilMin"      , 32, True , True )
-# pupilMaxPts       = getPoints(dom, "pupilMax"      , 32, True , True )
-# irisPts           = getPoints(dom, "iris"          , 32, True , True )
+pupilMinPts       = getPoints(dom, "pupilMin"      , 32, True , True )
+pupilMaxPts       = getPoints(dom, "pupilMax"      , 32, True , True )
+irisPts           = getPoints(dom, "iris"          , 32, True , True )
 scleraFrontPts    = getPoints(dom, "scleraFront"   ,  0, False, False)
 scleraBackPts     = getPoints(dom, "scleraBack"    ,  0, False, False)
 
@@ -111,8 +111,8 @@ light  = pi3d.Light(lightpos=(0, -500, -500), lightamb=(0.2, 0.2, 0.2))
 
 # Load texture maps --------------------------------------------------------
 
-# irisMap   = pi3d.Texture("graphics/iris.jpg"  , mipmap=False,
-#               filter=pi3d.GL_LINEAR)
+irisMap   = pi3d.Texture("graphics/iris.jpg"  , mipmap=False,
+              filter=pi3d.GL_LINEAR)
 scleraMap = pi3d.Texture("graphics/sclera.png", mipmap=False,
               filter=pi3d.GL_LINEAR, blend=True)
 
@@ -124,9 +124,9 @@ scleraMap = pi3d.Texture("graphics/sclera.png", mipmap=False,
 # Initialize static geometry -----------------------------------------------
 
 # Transform point lists to eye dimensions
-# scalePoints(pupilMinPts      , vb, eyeRadius)
-# scalePoints(pupilMaxPts      , vb, eyeRadius)
-# scalePoints(irisPts          , vb, eyeRadius)
+scalePoints(pupilMinPts      , vb, eyeRadius)
+scalePoints(pupilMaxPts      , vb, eyeRadius)
+scalePoints(irisPts          , vb, eyeRadius)
 scalePoints(scleraFrontPts   , vb, eyeRadius)
 scalePoints(scleraBackPts    , vb, eyeRadius)
 
@@ -137,27 +137,27 @@ scalePoints(scleraBackPts    , vb, eyeRadius)
 # roughly equal to 1/4 pixel, since 4x4 area sampling is used.
 
 # Determine change in pupil size to trigger iris geometry regen
-# irisRegenThreshold = 0.0
-# a = pointsBounds(pupilMinPts) # Bounds of pupil at min size (in pixels)
-# b = pointsBounds(pupilMaxPts) # " at max size
-# maxDist = max(abs(a[0] - b[0]), abs(a[1] - b[1]), # Determine distance of max
-#               abs(a[2] - b[2]), abs(a[3] - b[3])) # variance around each edge
-# # maxDist is motion range in pixels as pupil scales between 0.0 and 1.0.
-# # 1.0 / maxDist is one pixel's worth of scale range.  Need 1/4 that...
-# if maxDist > 0: irisRegenThreshold = 0.25 / maxDist
+irisRegenThreshold = 0.0
+a = pointsBounds(pupilMinPts) # Bounds of pupil at min size (in pixels)
+b = pointsBounds(pupilMaxPts) # " at max size
+maxDist = max(abs(a[0] - b[0]), abs(a[1] - b[1]), # Determine distance of max
+              abs(a[2] - b[2]), abs(a[3] - b[3])) # variance around each edge
+# maxDist is motion range in pixels as pupil scales between 0.0 and 1.0.
+# 1.0 / maxDist is one pixel's worth of scale range.  Need 1/4 that...
+if maxDist > 0: irisRegenThreshold = 0.25 / maxDist
 
 
 # Generate initial iris meshes; vertex elements will get replaced on
 # a per-frame basis in the main loop, this just sets up textures, etc.
-# rightIris = meshInit(32, 4, True, 0, 0.5/irisMap.iy, False)
-# rightIris.set_textures([irisMap])
-# rightIris.set_shader(shader)
-# # Left iris map U value is offset by 0.5; effectively a 180 degree
-# # rotation, so it's less obvious that the same texture is in use on both.
-# leftIris = meshInit(32, 4, True, 0.5, 0.5/irisMap.iy, False)
-# leftIris.set_textures([irisMap])
-# leftIris.set_shader(shader)
-# irisZ = zangle(irisPts, eyeRadius)[0] * 0.99 # Get iris Z depth, for later
+rightIris = meshInit(32, 4, True, 0, 0.5/irisMap.iy, False)
+rightIris.set_textures([irisMap])
+rightIris.set_shader(shader)
+# Left iris map U value is offset by 0.5; effectively a 180 degree
+# rotation, so it's less obvious that the same texture is in use on both.
+leftIris = meshInit(32, 4, True, 0.5, 0.5/irisMap.iy, False)
+leftIris.set_textures([irisMap])
+leftIris.set_shader(shader)
+irisZ = zangle(irisPts, eyeRadius)[0] * 0.99 # Get iris Z depth, for later
 
 
 # Generate scleras for each eye...start with a 2D shape for lathing...
@@ -215,13 +215,13 @@ frameCount    = 0
 beginningTime = time.time()
 
 rightEye.positionX(-eyePosition)
-# rightIris.positionX(-eyePosition)
+rightIris.positionX(-eyePosition)
 
 leftEye.positionX(eyePosition)
-# leftIris.positionX(eyePosition)
+leftIris.positionX(eyePosition)
 
-# currentPupilScale       =  0.5
-# prevPupilScale          = -1.0 # Force regen on first frame
+currentPupilScale       =  0.5
+prevPupilScale          = -1.0 # Force regen on first frame
 
 
 trackingPos = 0.3
@@ -237,11 +237,12 @@ def frame(p):
 	global moveDurationR, holdDurationR, startTimeR, isMovingR
 	global frames
 	global frameCount
-	# global leftIris, rightIris
-	# global pupilMinPts, pupilMaxPts, irisPts, irisZ
 	global leftEye, rightEye
-	# global prevPupilScale
-	# global irisRegenThreshold
+
+	global leftIris, rightIris
+	global pupilMinPts, pupilMaxPts, irisPts, irisZ
+	global prevPupilScale
+	global irisRegenThreshold
 	global trackingPos
 	global trackingPosR
 	global showIrisAndPupil
@@ -300,15 +301,15 @@ def frame(p):
 				isMoving     = True
 
 	# Regenerate iris geometry only if size changed by >= 1/4 pixel
-	# if abs(p - prevPupilScale) >= irisRegenThreshold:
-	# 	# Interpolate points between min and max pupil sizes
-	# 	interPupil = pointsInterp(pupilMinPts, pupilMaxPts, p)
-	# 	# Generate mesh between interpolated pupil and iris bounds
-	# 	mesh = pointsMesh(None, interPupil, irisPts, 4, -irisZ, True)
-	# 	# Assign to both eyes
-	# 	leftIris.re_init(pts=mesh)
-	# 	rightIris.re_init(pts=mesh)
-	# 	prevPupilScale = p
+	if abs(p - prevPupilScale) >= irisRegenThreshold:
+		# Interpolate points between min and max pupil sizes
+		interPupil = pointsInterp(pupilMinPts, pupilMaxPts, p)
+		# Generate mesh between interpolated pupil and iris bounds
+		mesh = pointsMesh(None, interPupil, irisPts, 4, -irisZ, True)
+		# Assign to both eyes
+		leftIris.re_init(pts=mesh)
+		rightIris.re_init(pts=mesh)
+		prevPupilScale = p
 
 	# Eyelid WIP
 
